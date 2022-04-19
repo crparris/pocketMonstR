@@ -1,0 +1,1178 @@
+---
+title: "Vignette Title"
+author: "Vignette Author"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+library(R6)
+library(shiny)
+library(plotly)
+library(knitr)
+library(plotly)
+library(tidyr)
+library(dplyr)
+library(tibble)
+```
+Introducing pocketMonstR:
+
+The concept behind the pocketMonstR package was to create a text-based and Pokemon-adjacent battle simulator within the bounds of R.  This package is best envisioned as a passion project, giving R users a fun and unique experience, as opposed to a practical analytical or presentational toolkit.
+
+Creating a game from scratch would have likely led me into some dead ends, so what better inspiration could there be than one of the most expansive and recognizable video game franchises out there? Of course, dealing with such large source material comes with its own costs. In response to this, a major goal of mine was finding a rewarding balance between faithfulness to the Pokemon franchise and the creativity of users. As such, there's a sufficient pool of Pokemon from the actual Pokemon franchise, as well as some "Fakemon"- conceptual Pokemon exclusive to the context of this package. Users are incentivized to create their own species of Pokemon, attacks, etc, due to the easy-to-follow code making customization rather accessible. While Pokemon is the inspiration for pocketMonstR, it doesn't exist as a replacement, but rather to create a casual, more customizable experience for the users. This package has Pokemon serve as just the basis of a more limitless game.
+
+The "Pokemon" are constructed through an R6 class, with gameplay elements stemming from functions defined inside of and outside of the class. The class is defined as follows.
+```{r}
+Pokemon <- R6Class(
+  classname = "Pokemon",
+  list(
+    #The species of the Pokemon is kept track of so as to allow for the       evolution mechanic. You can still nickname your Pokemon through the           variable names that the "Pokemon" objects are stored in
+    species = NULL,
+    #Pokemon types allow for damage to increase or decrease based off of the  relationship between the attack's type and the opposing Pokemon's type. Think of the famous "Super-Effective!" and "Not very effective..." markers from the Pokemon games. Every Pokemon has a primary type (type1), but not every Pokemon has a secondary type (type2.
+    type1 = NULL,
+    type2 = NA,
+    #HP serves as a health bar, which is lowered when the Pokemon is on the receving end of an attack. Upon HP reaching zero, the Pokemon is declared fainted.
+    hp = NULL,
+    #The receiving Pokemon's defense is used to calculate the damage it receives. the higher defense a Pokemon has, the less damage it receives.
+    defense = NULL,
+    #the higher offense a Pokemon has, the more damage its attacks deal to the receiving Pokemon.
+    
+    #If an attack has a base power of 60, and the dealing Pokemon has an offense of 60, but the receiving Pokemon has a high defense of 100, then the receiving Pokemon only lose 20 HP. if the attack is super-effective against the receiving Pokemon's type, it instead loses 40 HP.
+    offense = NULL,
+    
+    #It is suggested that all Pokemon start at level 1, and that the level be raised using the later-defined levelup() function. For many species of Pokemon, when their level reaches a certain number, they're granted the ability to evolve. Evolution and leveling up both serve to power-up the Pokemon.
+    level = 1,
+    #Turn serves as a boolean switch to prevent players from acting twice consecutively. It is flipped off after the Pokemon deals an attack, and flipped back on when the Pokemon receives an attack. This switch is defined inside of the attack() function, rather than inside of this class
+    turn = TRUE,
+    #Happiness serves as an alternate evolution requirement. This is exclusive to a few Pokemon, as it is a rarer evolution method in the Pokemon franchise. To prevent crowded output, this stat isn't displayed when calling the object.
+    happiness = 0,
+    
+    #Evolution stage is part of ruleset pocketMonstR uses to restrict certain Pokemon from using certain moves. More powerful moves are locked to Pokemon in their 2nd or 3rd evolution stage. Note that certain Pokemon can go from evoluton stage 1 to evolution stage 3 after one evolution, as some two-stage Pokemon families share a similar strength level to that of three-stage families. 
+    
+    #To explain in simple terms, a Charmander can use ember, the weakest common Fire type move, but gains access to Flamethrower when evolving into Charmeleon. Finally, when fully evolved into the powerful Charizard species, the same Pokemon object gains access to the mighty Fire Blast attack.
+    evo.stage = 1,
+  
+    #The initial species for this class is set to Squirtle, as it is one of the starting trio in the original Pokemon games.
+      initialize = function(species = "Squirtle", type1 = "Water", type2 = NA,
+                            hp = 100, defense = 0, offense = 0, level = 1, turn = TRUE, happiness = 0, evo.stage = 1) {
+        self$species <- species
+        self$type1 <- type1
+        self$type2 <- type2
+        self$hp <- hp
+        self$defense <- defense
+        self$offense <- offense
+        self$level <- level
+        self$turn <- turn
+        self$evo.stage <- evo.stage
+    },
+    
+    #Displaying the Pokemon's attributes
+    print = function(...) {
+    cat("Pokemon: \n")
+    cat("  Species: ", self$species, "\n", sep = "")
+    cat("  Primary Type:  ", self$type1, "\n", sep = "")
+    cat("  Secondary Type:  ", self$type2, "\n", sep = "")
+    cat("  Level: ", self$level, "\n", sep = "")
+    cat("  Evolution Stage: ", self$evo.stage, "\n", sep = "")
+    cat("  HP: ", self$hp, "\n", sep = "")
+    cat("  Defense:  ", self$defense, "\n", sep = "")
+    cat("  Offense:  ", self$offense, "\n", sep = "")
+    invisible(self)
+    },
+    
+    #A "level up" function that raises the Pokemon's level as well as boosts its stats. This works by generating a random number for each individual level that's being added to the Pokemon, rounding it to the nearest whole number (making 2 the most common stat increase) and summing all of the generated numbers into one final stat increase. IN the original Pokemon games, stat growth is distributed differently for each species. This was impractically for the pocketMonstR package, so stat boosts Pokemon gain when evolving are more exaggerated to match the nature of the Pokemon species they're evolving into.
+    levelup  = function(x = 1) {
+      #setting a level cap of 100, as in the original Pokemon games
+        if (self$level+x > 100) {
+        stop(
+        "The Pokemon's level cannot exceed 100",
+        call. = TRUE
+        )}
+      self$level <- self$level + x
+      self$defense <- self$defense +
+        sum(round(runif(x,1,3),0))
+      self$offense <- self$offense + 
+        sum(round(runif(x,1,3),0))
+        },
+    #the damage() function removes health from the receiving Pokemon based off of the damage calculated in the attack() function.
+    damage = function(x){
+      self$hp <- self$hp - x
+      #if (self$hp <= 0){
+       # stop("The opposing Pokemon has fainted.", call. = TRUE)
+      #}
+    },
+    
+    #Certain attacks from the Pokemon franchsie possess the ability of restoring the dealing Pokemon's health with a fraction of the damage dealt. This is included in the package via absorb() , which is called based off of a boolean switch in the attack( function).
+    absorb = function(x){
+      self$hp <- self$hp + 0.5*x
+    },
+    #Here is a sample validator for the class.
+    validate_factor = function(x) {
+      values <- unclass(x)
+      levels <- attr(x, "levels")
+      if (!all(!is.na(values))) {
+        stop(
+        "All `x` values must be non-missing!",
+        call. = FALSE
+    )}}
+))
+```
+
+Here we compile the PokeDex, which serves as this packages pool of ~100 pre-loaded Pokemon species. Classic Pokemon, newer favorites, and even fanmade Pokemon are included.
+```{r}
+Squirtle <- Pokemon$new("Squirtle", "Water")
+Charmander <- Pokemon$new("Charmander", "Fire")
+Bulbasaur <- Pokemon$new("Bulbasaur", "Grass", "Poison")
+Eevee <- Pokemon$new("Eevee", "Normal")
+Pichu <- Pokemon$new("Pichu", "Electric")
+Meowth <- Pokemon$new("Meowth", "Normal")
+Ralts <- Pokemon$new("Ralts", "Psychic", "Fairy")
+Gible <- Pokemon$new("Gible", "Dragon", "Ground")
+Ponyta <- Pokemon$new("Ponyta", "Fire")
+Munchlax <- Pokemon$new("Munchlax", "Normal")
+Riolu <- Pokemon$new("Riolu", "Fighting")
+Magikarp <- Pokemon$new("Magikarp", "Water")
+Sandile <- Pokemon$new("Sandile", "Ground", "Dark")
+Ekans <- Pokemon$new("Ekans", "Poison")
+Aron <- Pokemon$new("Aron", "Steel", "Rock")
+Starly <- Pokemon$new("Starly", "Normal", "Flying")
+Yamask <- Pokemon$new("Yamask", "Ghost")
+Venipede <- Pokemon$new("Venipede", "Bug", "Psychic")
+Cubchoo <- Pokemon$new("Cubchoo", "Ice")
+Dratini <- Pokemon$new("Dratini", "Dragon")
+Dreepy <- Pokemon$new("Dreepy", "Dragon", "Ghost")
+Numel <- Pokemon$new("Numel", "Fire", "Ground")
+Mudkip <- Pokemon$new("Mudkip", "Water", "Ground")
+Torchic <- Pokemon$new("Torchic", "Fire")
+Impidimp <- Pokemon$new("Impidimp", "Dark", "Fairy")
+Grubbin <- Pokemon$new("Grubbin", "Bug")
+Ferroseed <- Pokemon$new("Ferroseed", "Grass", "Steel")
+Rolycoly <- Pokemon$new("Rolycoly", "Rock")
+Rookidee <- Pokemon$new("Rookidee", "Flying")
+Spheal <- Pokemon$new("Spheal", "Ice", "water")
+Larvitar <- Pokemon$new("Larvitar", "Rock", "Ground")
+Croagunk <- Pokemon$new("Croagunk", "Poison", "Fighting")
+Pancham <- Pokemon$new("Pancham", "Fighting")
+
+#Fake pokemon
+Brainon <- Pokemon$new("Brainon", "Psychic")
+Soupin <- Pokemon$new("Soupin", "Water")
+Dolphlegm <- Pokemon$new("Dolphlegm", "Water", "Poison")
+Aurorror<- Pokemon$new("Aurorror", "Ghost")
+Magiprent <- Pokemon$new("Magiprent", "Fairy")
+Lampish <- Pokemon$new("Lampish", "Electric")
+
+Species <- c("Squirtle", "Wartortle", "Blastoise", 
+             "Charmander", "Charmeleon", "Charizard", 
+             "Bulbasaur", "Ivysaur", "Venusaur",
+             "Eevee", "Sylveon", 
+             "Pichu", "Pikachu", "Raichu",
+             "Meowth", "Persian",
+             "Ralts", "Kirlia", "Gardevoir",
+             "Gible", "Gabite", "Garchomp",
+             "Ponyta", "Rapidash",
+             "Munchlax", "Snorlax",
+             "Riolu", "Lucario",
+             "Magikarp", "Gyarados",
+             "Sandile","Krokorok", "Krookodile",
+             "Ekans", "Arbok"
+             , "Aron", "Lairon", "Aggron",
+             "Starly", "Staravia", "Staraptor"
+             , "Yamask", "Cofagrigus",
+             "Venipede", "Whirlipede", "Scolipede"
+             , "Cubchoo", "Beartic",
+             "Dratini", "Dragonair", "Dragonite",
+             "Dreepy", "Drakloak", "Dragapult",
+             "Numel", "Camerupt",
+             "Mudkip", "Marshtomp", "Swampert",
+             "Torchic", "Combusken", "Blaziken",
+             "Impidimp", "Morgrem", "Grimmsnarl",
+             "Grubbin", "Charjabug", "Vikavolt",
+             "Ferroseed", "Ferrothorn",
+             "Rolycoly", "Carkol", "Coalossal",
+             "Rookidee", "Corvisquire", "Corviknight",
+             "Spheal", "Sealeo", "Walrein",
+             "Larvitar", "Pupitar", "Tyranitar",
+             "Croagunk", "Toxicroak",
+             "Pancham", "Pangoro",
+             
+             #fake pokemon
+             "Brainon", "Psydon", "Psyclops",
+             "Soupin", "Souptaki",
+             "Dolphlegm", "Toxorca", "Whalution", 
+             "Aurorror", "Crystellation", "Blizziverse",
+             "Magiprent", "Equestrasus", "Uniwarn",
+             "Lampish", "Ophswich", "Shinister"
+             )
+
+Primary_Type <- c("Water", "Water", "Water", 
+             "Fire", "Fire","Fire",
+             "Grass","Grass","Grass", 
+             "Normal","Fairy", 
+             "Electric", "Electric", "Electric",
+             "Normal", "Normal",
+             "Psychic", "Psychic", "Psychic",
+             "Dragon", "Dragon", "Dragon",
+             "Fire", "Fire",
+             "Normal", "Normal",
+             "Fighting", "Fighting",
+             "Water", "Water",
+             "Ground", "Ground", "Ground",
+             "Poison", "Poison",
+             "Steel", "Steel", "Steel",
+             "Normal", "Normal", "Normal",
+             "Ghost", "Ghost",
+             "Bug", "Bug", "Bug",
+             "Ice", "Ice",
+             "Dragon", "Dragon", "Dragon",
+             "Dragon", "Dragon", "Dragon",
+             "Fire", "Fire",
+             "Water", "Water", "Water",
+             "Fire", "Fire", "Fire",
+             "Dark", "Dark", "Dark",
+             "Bug", "Bug","Bug",
+             "Grass", "Grass",
+             "Rock", "Rock", "Rock",
+             "Flying", "Flying", "Flying",
+             "Ice", "Ice", "Ice",
+             "Rock", "Rock", "Rock",
+             "Poison", "Poison",
+             "Fighting", "Fighting",
+             
+             #fake pokemon
+             "Psychic", "Psychic", "Psychic",
+             "Water", "Water",
+             "Water", "Water", "Water",
+             "Ghost", "Ghost", "Ghost",
+             "Fairy", "Fairy", "Fairy",
+             "Electric", "Electric", "Electric"
+             )
+Secondary_Type <- c(NA,NA,NA,
+            NA,NA,"Flying",
+            "Poison","Poison", "Poison", 
+            NA, NA,
+            NA, NA, NA,
+            NA, NA, 
+            "Fairy", "Fairy", "Fairy",
+            "Ground", "Ground", "Ground",
+            NA, NA,
+            NA, NA,
+            NA, "Steel",
+            NA, "Flying",
+            "Dark", "Dark", "Dark"
+            , NA, NA,
+            "Rock", "Rock", "Rock",
+            "Flying", "Flying", "Flying",
+            NA, NA,
+            "Poison", "Poison", "Poison",
+            NA, NA,
+            NA, NA, "Flying",
+            "Ghost", "Ghost", "Ghost", 
+            "Ground", "Ground",
+            NA, "Ground", "Ground",
+            NA, "Fighting", "Fighting",
+            "Fairy", "Fairy", "Fairy",
+            NA, "Electric", "Electric",
+            "Steel", "Steel",
+            NA, "Fire", "Fire"
+            , NA, NA, "Steel",
+            "Water", "Water", "Water"
+            , "Ground", "Ground", "Dark",
+            "Fighting", "Fighting",
+            NA, "Dark",
+            
+            #fake pokemon
+            NA, "Dragon", "Dragon",
+            NA, "Fire",
+            "Poison", "Poison", "Poison",
+            NA, "Ice", "Ice",
+            NA, "Flying", "Steel",
+            NA, "Dark", "Dark"
+            )
+
+PokeDex <- data.frame(Species, Primary_Type, Secondary_Type)
+#colnames(Pokemon.DF) = c("Species", "Primary Type", "Secondary Type")
+PokeDex
+```
+The evolve() function allows for your Pokemon to evolve, provided they meet the relevant criteria, which is defined internally.
+
+```{r}
+evolve <- function(pokemon1){
+    if 
+  (pokemon1$species == "Bulbasaur" & pokemon1$level >= 16){
+    pokemon1$species <- "Ivysaur"
+    pokemon1$offense <- pokemon1$offense + 18
+    pokemon1$defense <- pokemon1$defense + 17
+    pokemon1$evo.stage <- 2
+  } else if 
+  (pokemon1$species == "Ivysaur" & pokemon1$level >= 32){
+    pokemon1$species <- "Venusaur"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if
+  (pokemon1$species == "Charmander" & pokemon1$level >= 16){
+    pokemon1$species <- "Charmeleon"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 15
+    pokemon1$evo.stage <- 2
+  } else if 
+  (pokemon1$species == "Charmeleon" & pokemon1$level >= 36){
+    pokemon1$species <- "Charizard"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$type2 <- "Flying"
+    pokemon1$evo.stage <- 3
+  } else if
+  (pokemon1$species == "Squirtle" & pokemon1$level >= 16){
+    pokemon1$species <- "Wartortle"
+    pokemon1$offense <- pokemon1$offense + 15
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 2
+  } else if
+  (pokemon1$species == "Wartortle" & pokemon1$level >= 16){
+    pokemon1$species <- "Blastoise"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 35
+    pokemon1$evo.stage <- 3
+  } else if
+  (pokemon1$species == "Eevee" & pokemon1$happiness >= 100){
+    split.evo <- round(runif(1, 0.5, 3.49), 0)
+    if (split.evo == 1){
+      pokemon1$species <- "Sylveon"
+      pokemon1$offense <- pokemon1$offense + 30
+      pokemon1$defense <- pokemon1$defense + 25
+      pokemon1$type1 <- "Fairy"
+      pokemon1$evo.stage <- 2
+    } else if (split.evo == 2){
+      pokemon1$species <- "Espeon"
+      pokemon1$offense <- pokemon1$offense + 35
+      pokemon1$defense <- pokemon1$defense + 20
+      pokemon1$type1 <- "Psychic"
+      pokemon1$evo.stage <- 2
+    } else if (split.evo == 3){
+      pokemon1$species <- "Umbreon"
+      pokemon1$offense <- pokemon1$offense + 20
+      pokemon1$defense <- pokemon1$defense + 35
+      pokemon1$type1 <- "Dark"
+      pokemon1$evo.stage <- 2
+    }
+  } else if (pokemon1$species == "Pichu" & pokemon1$happiness >= 100){
+    pokemon1$species <- "Pikachu"
+    pokemon1$offense <- pokemon1$offense + 26
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Pikachu" & pokemon1$happiness >= 200){
+    pokemon1$species <- "Raichu"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 24
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Ralts" & pokemon1$level >= 20){
+    pokemon1$species <- "Kirlia"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 10
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Kirlia" & pokemon1$level >= 30){
+    pokemon1$species <- "Gardevoir"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Gible" & pokemon1$level >= 24){
+    pokemon1$species <- "Gabite"
+    pokemon1$offense <- pokemon1$offense + 30
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Gabite" & pokemon1$level >= 48){
+    pokemon1$species <- "Garchomp"
+    pokemon1$offense <- pokemon1$offense + 45
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Ponyta" & pokemon1$level >= 42){
+    pokemon1$species <- "Rapidash"
+    pokemon1$offense <- pokemon1$offense + 55
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Munchlax" & pokemon1$happiness >= 200){
+    pokemon1$species <- "Snorlax"
+    pokemon1$offense <- pokemon1$offense + 30
+    pokemon1$defense <- pokemon1$defense + 80
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Riolu" & pokemon1$happiness >= 200){
+    pokemon1$species <- "Lucario"
+    pokemon1$offense <- pokemon1$offense + 80
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$type2 <- "Steel"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Magikarp" & pokemon1$level >= 20){
+    pokemon1$species <- "Gyarados"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Sandile" & pokemon1$level >= 29){
+    pokemon1$species <- "Krokorok"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 15
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Krokorok" & pokemon1$level >= 40){
+    pokemon1$species <- "Krookodile"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Aron" & pokemon1$level >= 32){
+    pokemon1$species <- "Lairon"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Lairon" & pokemon1$level >= 42){
+    pokemon1$species <- "Aggron"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Starly" & pokemon1$level >= 14){
+    pokemon1$species <- "Staravia"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Staravia" & pokemon1$level >= 34){
+    pokemon1$species <- "Staraptor"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Yamask" & pokemon1$level >= 34){
+    pokemon1$species <- "Cofagrigus"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 50
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Venipede" & pokemon1$level >= 22){
+    pokemon1$species <- "Whirlipede"
+    pokemon1$offense <- pokemon1$offense + 15
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Whirlipede" & pokemon1$level >= 30){
+    pokemon1$species <- "Scolipede"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Cubchoo" & pokemon1$level >= 37){
+    pokemon1$species <- "Beartic"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Meowth" & pokemon1$level >= 20){
+    pokemon1$species <- "Persian"
+    pokemon1$offense <- pokemon1$offense + 45
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Ekans" & pokemon1$level >= 22){
+    pokemon1$species <- "Arbok"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 35
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Dratini" & pokemon1$level >= 30){
+    pokemon1$species <- "Dragonair"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Dragonair" & pokemon1$level >= 55){
+    pokemon1$species <- "Dragonite"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$type2 <- "Flying"
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Dreepy" & pokemon1$level >= 50){
+    pokemon1$species <- "Drakloak"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Drakloak" & pokemon1$level >= 60){
+    pokemon1$species <- "Dragapult"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 35
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Mudkip" & pokemon1$level >= 16){
+    pokemon1$species <- "Marshtomp"
+    pokemon1$offense <- pokemon1$offense + 27
+    pokemon1$defense <- pokemon1$defense + 28
+    pokemon1$evo.stage <- 2
+    pokemon1$type2 <- "Ground"
+  } else if (pokemon1$species == "Marshtomp" & pokemon1$level >= 36){
+    pokemon1$species <- "Swampert"
+    pokemon1$offense <- pokemon1$offense + 38
+    pokemon1$defense <- pokemon1$defense + 27
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Torchic" & pokemon1$level >= 16){
+    pokemon1$species <- "Combusken"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$type2 <- "Fighting"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Combusken" & pokemon1$level >= 36){
+    pokemon1$species <- "Blaziken"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Numel" & pokemon1$level >= 33){
+    pokemon1$species <- "Camerupt"
+    pokemon1$offense <- pokemon1$offense + 55
+    pokemon1$defense <- pokemon1$defense + 50
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Impidimp" & pokemon1$level >= 32){
+    pokemon1$species <- "Morgrem"
+    pokemon1$offense <- pokemon1$offense + 30
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Morgrem" & pokemon1$level >= 42){
+    pokemon1$species <- "Grimmsnarl"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$evo.stage <- 3 
+  } else if (pokemon1$species == "Grubbin" & pokemon1$level >= 20){
+    pokemon1$species <- "Charjabug"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$type2 <- "Electric"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Charjabug" & pokemon1$level >= 32){
+    pokemon1$species <- "Vikavolt"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Ferroseed" & pokemon1$level >= 40){
+    pokemon1$species <- "Ferrothorn"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 80
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Rolycoly" & pokemon1$level >= 18){
+    pokemon1$species <- "Carkol"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$type2 <- "Fire"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Carkol" & pokemon1$level >= 34){
+    pokemon1$species <- "Coalossoal"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Rookidee" & pokemon1$level >= 18){
+    pokemon1$species <- "Corvisquire"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Corvisquire" & pokemon1$level >= 38){
+    pokemon1$species <- "Corviknight"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 50
+    pokemon1$type2 <- "Steel"
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Larvitar" & pokemon1$level >= 30){
+    pokemon1$species <- "Pupitar"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Pupitar" & pokemon1$level >= 55){
+    pokemon1$species <- "Tyranitar"
+    pokemon1$offense <- pokemon1$offense + 45
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$type2 <- "Dark"
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Croagunk" & pokemon1$level >= 37){
+    pokemon1$species <- "Toxicroak"
+    pokemon1$offense <- pokemon1$offense + 60
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Pancham" & pokemon1$level >= 32){
+    pokemon1$species <- "Pangoro"
+    pokemon1$offense <- pokemon1$offense + 50
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 2
+    pokemon1$type2 <- "Dark"
+    #fake pokemon
+  } else if (pokemon1$species == "Brainon" & pokemon1$level >= 34){
+    pokemon1$species <- "Psydon"
+    pokemon1$offense <- pokemon1$offense + 30
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$type <- "Dragon"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Psydon" & pokemon1$level >= 52){
+    pokemon1$species <- "Psyclops"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Soupin" & pokemon1$level >= 30){
+    pokemon1$species <- "Souptaki"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$type2 <- "Fire"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Dolphlegm" & pokemon1$level >= 25){
+    pokemon1$species <- "Toxorca"
+    pokemon1$offense <- pokemon1$offense + 25
+    pokemon1$defense <- pokemon1$defense + 35
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Toxorca" & pokemon1$level >= 42){
+    pokemon1$species <- "Whalution"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 40
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Aurrorror" & pokemon1$level >= 22){
+    pokemon1$species <- "Crystellation"
+    pokemon1$offense <- pokemon1$offense + 35
+    pokemon1$defense <- pokemon1$defense + 25
+    pokemon1$type2 <- "Ice"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Crystellation" & pokemon1$level >= 44){
+    pokemon1$species <- "Blizziverse"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Magiprent" & pokemon1$level >= 20){
+    pokemon1$species <- "Equestrasus"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$type2 <- "Flying"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Equestrasus" & pokemon1$level >= 55){
+    pokemon1$species <- "Uniwarn"
+    pokemon1$offense <- pokemon1$offense + 30
+    pokemon1$defense <- pokemon1$defense + 50
+    pokemon1$type2 <- "Steel"
+    pokemon1$evo.stage <- 3
+  } else if (pokemon1$species == "Lampish" & pokemon1$level >= 16){
+    pokemon1$species <- "Ophswich"
+    pokemon1$offense <- pokemon1$offense + 20
+    pokemon1$defense <- pokemon1$defense + 20
+    pokemon1$type2 <- "Dark"
+    pokemon1$evo.stage <- 2
+  } else if (pokemon1$species == "Ophswich" & pokemon1$level >= 40){
+    pokemon1$species <- "Shinister"
+    pokemon1$offense <- pokemon1$offense + 40
+    pokemon1$defense <- pokemon1$defense + 30
+    pokemon1$evo.stage <- 3
+      } else {
+    stop(paste0("This Pokemon cannot currently evolve"), call. = FALSE)
+  }
+}
+```
+Note that this is only the baseline roster. Feel free to add your favorites as you please, or use your imagination and create entirely new species of Pokemon!
+
+To finish off this portion of the document, I have included a shiny object to help you sort through all of the inlcuded Pokemon species by type:
+
+```{r error=TRUE}
+ui <- fluidPage(
+  plotlyOutput("bar"),
+  plotlyOutput("list")
+)
+server <- function(input, output) {
+  output$bar <- renderPlotly({
+    PokeDex %>% group_by(Primary_Type) %>% summarise(count = n()) %>%
+  plot_ly(x = ~ Primary_Type, y = ~ count) %>% add_bars()
+  })
+  
+  #plot_ly(x = ~ price, data = diamonds)  %>% add_histogram(color = I("pink"))
+  output$list <- renderPlotly({
+    click <- event_data("plotly_click")
+    if (is.null(click)) return(NULL)
+    #filter the data by the selected Cut value
+    PokeDex %>%
+      filter(Primary_Type %in% click$x) %>%
+      #produce a histogram based on the filtered data. need to figure out how to display this visual before it's filtered as well
+      #textOutput(Species, container = if (inline) span else div, inline = FALSE)
+    plot_ly(x = ~ Species) %>% add_table(rownames=FALSE)
+      #add_histogram(color = I("pink"))
+      
+  })
+}
+shinyApp(ui, server)
+```
+
+Now to list all of the pre-loaded attacks, with a base amount of three for each Pokemon type:
+```{r}
+#Fire attacks
+Ember <- c(power = 20, type = "Fire", evo.stage = 1)
+Flamethrower <- c(power = 40, type = "Fire", evo.stage = 2)
+Fire.Blast <- c(power = 60, type = "Fire", evo.stage = 3)
+
+#Water attacks
+Bubble <- c(power = 20, type = "Water", evo.stage = 1)
+Surf <- c(power = 40, type = "Water", evo.stage = 2)
+Hydro.Pump <- c(power = 60, type = "Water", evo.stage = 3)
+
+#Grass attacks
+Vine.Whip <- c(power = 20, type = "Grass", absorb = FALSE, evo.stage = 1)
+Mega.Drain <- c(power = 40, type = "Grass", absorb = TRUE, evo.stage = 2)
+Giga.Drain <- c(power = 60, type = "Grass", absorb = TRUE, evo.stage = 3)
+
+#Electric attacks
+Nuzzle <- c(power = 20, type = "Electric", evo.stage = 1)
+Discharge <- c(power = 40, type = "Electric", evo.stage = 2)
+Thunder <- c(power = 60, type = "Electric", evo.stage = 3)
+
+#Rock attacks
+Rock.Throw <- c(power = 30, type = "Rock", evo.stage = 1)
+Rock.Slide <- c(power = 45, type = "Rock", evo.stage = 2)
+Ancient.Power <- c(power = 60, type = "Rock", evo.stage = 3)
+
+#Ground attacks
+Mud.Shot <- c(power = 20, type = "Ground", evo.stage = 1)
+Bulldoze <- c(power = 40, type = "Ground", evo.stage = 2)
+Earthquake <- c(power = 65, type = "Ground", evo.stage = 3)
+
+#Steel attacks
+Gyro.Ball <- c(power = 30, type = "Steel", evo.stage = 1)
+Flash.Cannon <- c(power = 45, type = "Steel", evo.stage = 2)
+Iron.Head <- c(power = 65, type = "Steel", evo.stage = 3)
+
+#Dark attacks
+Bite <- c(power = 20, type = "Dark", evo.stage = 1)
+Sucker.Punch <- c(power = 40, type = "Dark", evo.stage = 2)
+Dark.Pulse <- c(power = 60, type = "Dark", evo.stage = 3)
+
+#Pyschic attacks
+Confusion <- c(power = 20, type = "Psychic", evo.stage = 1)
+Psybeam <- c(power = 45, type = "Psychic", evo.stage = 2)
+Psycho.Cut <- c(power = 65, type = "Psychic", evo.stage = 3)
+
+#Poison Attacks
+Poison.Sting <- c(power = 20, type = "Poison", evo.stage = 1)
+Venoshock <- c(power = 45, type = "Poison", evo.stage = 2)
+Poison.Fang <- c(power = 65, type = "Poison", evo.stage = 3)
+
+#Fairy Attacks
+Fairy.Wind <- c(power = 20, type = "Fairy", evo.stage = 1, absorb = FALSE)
+Draining.Kiss <- c(power = 40, type = "Fairy", evo.stage = 2, absorb = TRUE)
+Moon.Blast <- c(power = 60, type = "Fairy", evo.stage = 3, absorb = FALSE)
+
+#Dragon Attacks
+Dragon.Breath <- c(power = 30, type = "Dragon", evo.stage = 1)
+Dragon.Pulse <- c(power = 45, type = "Dragon", evo.stage = 2)
+Outrage <- c(power = 65, type = "Dragon", evo.stage = 3)
+
+#Normal attacks
+Tackle <- c(power = 20, type = "Normal", evo.stage = 1)
+Quick.Attack <- c(power = 40, type = "Normal", evo.stage = 2)
+Take.Down <- c(power = 70, type = "Normal", evo.stage = 3)
+
+#Ghost attacks
+Astonish <- c(power = 20, type = "Ghost", evo.stage = 1)
+Shadow.Claw <- c(power = 40, type = "Ghost", evo.stage = 2)
+Shadow.Ball <- c(power = 60, type = "Ghost", evo.stage = 3)
+
+#Fighting Attacks
+Low.Kick <- c(power = 20, type = "Fighting", evo.stage = 1)
+Brick.Break <- c(power = 45, type = "Fighting", evo.stage = 2)
+Close.Combat <- c(power = 70, type = "Fighting", evo.stage = 3)
+
+#Bug Attacks
+Bug.Buzz <- c(power = 30, type = "Bug", evo.stage = 1)
+Bug.Bite <- c(power = 50, type = "Bug", evo.stage = 2)
+X.Scissor <- c(power = 65, type = "Bug", evo.stage = 3)
+
+#Ice Attacks
+Ice.Shard <- c(power = 20, type = "Ice", evo.stage = 1)
+Ice.Beam <- c(power = 40, type = "Ice", evo.stage = 2)
+Blizzard <- c(power = 60, type = "Ice", evo.stage = 3)
+
+#Flying
+Peck <- c(power = 20, type = "Flying", evo.stage = 1)
+Pluck <- c(power = 50, type = "Flying", evo.stage = 2)
+Air.Slash <- c(power = 65, type = "Flying", evo.stage = 3)
+
+Attack.Set <- c(
+  Ember, Flamethrower, Fire.Blast, 
+  Bubble, Surf, Hydro.Pump, 
+  Vine.Whip, Mega.Drain, Giga.Drain,
+  Nuzzle, Discharge, Thunder,
+  Rock.Throw, Rock.Slide, Ancient.Power,
+  Mud.Shot, Bulldoze, Earthquake,
+  Gyro.Ball, Flash.Cannon, Iron.Head,
+  Bite, Sucker.Punch, Dark.Pulse,
+  Confusion, Psybeam, Psycho.Cut,
+  Poison.Sting, Venoshock, Poison.Fang,
+  Fairy.Wind, Draining.Kiss, Moon.Blast,
+  Dragon.Breath, Dragon.Pulse, Outrage,
+  Tackle, Quick.Attack, Take.Down,
+  Astonish, Shadow.Claw, Shadow.Ball,
+  Low.Kick, Brick.Break, Close.Combat,
+  Bug.Buzz, Bug.Bite, X.Scissor,
+  Ice.Shard, Ice.Beam, Blizzard,
+  Peck, Pluck, Air.Slash)
+```
+
+Attacks are exclusive to Pokemon which share the same type, with the exception that all Pokemon types have access to normal-type attacks. These attacks can be called through the attack() function, which accounts for type advantages/disadvantages/immunities, HP absorption qualities, and the turn-based system. Incorporating the type relationships required a hefty amount of code, so bare with me:
+```{r}
+#Dealing damage to a Pokemon and lowering its health
+attack <-function(pokemon1, move, pokemon2){
+  #Checking the turn-based constraint
+  if (pokemon1$turn == FALSE){
+    stop("It is not this Pokemon's turn",
+        call. = TRUE)
+  }
+  
+  compat = NULL
+  
+  #Checking type compatibility with the user's Pokemon.
+  if (move["type"] == pokemon1$type1){
+    compat = TRUE
+  } else if (move["type"] == pokemon1$type2) {
+    compat = TRUE
+  } else if (move["type"] == "Normal") {
+    compat = TRUE
+  } else {
+    compat = FALSE
+  }
+  
+  
+  if (compat == FALSE){
+    stop(paste0(pokemon1$species, "cannot use attacks of this type"), call. = TRUE)
+  } 
+  
+  #Checking if the Pokemon is powerful enough to use the attack
+  if (move["evo.stage"] > pokemon1$evo.stage){
+    stop(paste0(pokemon1$species, " is not powerful enough to use this attack"), call. = TRUE)
+  }
+  
+  #super-effective!!
+  if (move["type"] == "Fire" & !is.na(pokemon2$type1 == "Grass" | pokemon2$type2 == "Grass" | pokemon2$type1 == "Bug"| pokemon2$type2 == "Bug" | pokemon2$type1 == "Ice" | pokemon2$type2 == "Ice"| pokemon2$type1 == "Steel" | pokemon2$type2 == "Steel")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  #deals damage to pokemon2
+  pokemon2$damage(x)
+  } else if 
+  #not very effective...
+  (move["type"] == "Fire" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Water" | pokemon2$type2== "Water" | pokemon2$type1== "Rock" | pokemon2$type2== "Rock" | pokemon2$type1== "Dragon" | pokemon2$type2== "Dragon")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Water" & !is.na(pokemon2$type1 == "Ground" | pokemon2$type2 == "Ground" | pokemon2$type1 == "Rock"| pokemon2$type2 == "Rock" | pokemon2$type1 == "Fire" | pokemon2$type2 == "Fire")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Water" & !is.na(pokemon2$type1== "Water" | pokemon2$type2== "Water" | pokemon2$type1== "Grass" | pokemon2$type2== "Grass" | pokemon2$type1== "Dragon" | pokemon2$type2== "Dragon")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Grass" & !is.na(pokemon2$type1 == "Ground" | pokemon2$type2 == "Ground" | pokemon2$type1 == "Rock"| pokemon2$type2 == "Rock" | pokemon2$type1 == "Water" | pokemon2$type2 == "Water")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  #granting moves permission to absorb the opposing Pokemon's health
+  if (move["absorb"] == TRUE){
+    pokemon1$absorb(x)
+    }
+  } else if (move["type"] == "Grass" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Grass" | pokemon2$type2== "Grass" | pokemon2$type1== "Poison" | pokemon2$type2== "Poison" | pokemon2$type1== "Dragon" | pokemon2$type2== "Dragon"| pokemon2$type1== "Flying" | pokemon2$type2== "Flying"| pokemon2$type1== "Steel" | pokemon2$type2== "Steel" | pokemon2$type1== "Bug" | pokemon2$type2== "Bug")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  if (move["absorb"] == TRUE){
+    pokemon1$absorb(x)
+    }
+  } else if (move["type"] == "Normal" & !is.na(pokemon2$type1 == "Ghost" | pokemon2$type2 == "Ghost")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Normal" & !is.na(pokemon2$type1== "Rock" | pokemon2$type2== "Rock" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Electric" & !is.na(pokemon2$type1 == "Water" | pokemon2$type2 == "Water" | pokemon2$type1 == "Flying"| pokemon2$type2 == "Flying")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Electric" & !is.na(pokemon2$type1== "Electric" | pokemon2$type2== "Electric" | pokemon2$type1== "Grass" | pokemon2$type2== "Grass" | pokemon2$type1== "Dragon" | pokemon2$type2== "Dragon")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Electric" & !is.na(pokemon2$type1 == "Ground" | pokemon2$type2 == "Ground")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ice" & !is.na(pokemon2$type1 == "Ground" | pokemon2$type2 == "Ground" | pokemon2$type1 == "Grass"| pokemon2$type2 == "Grass" | pokemon2$type1 == "Flying" | pokemon2$type2 == "Flying" | pokemon2$type1 == "Dragon" | pokemon2$type2 == "Dragon")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ice" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Water" | pokemon2$type2== "Water" | pokemon2$type1== "Ice" | pokemon2$type2== "Ice" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Fighting" & !is.na(pokemon2$type1 == "Rock" | pokemon2$type2 == "Rock" | pokemon2$type1 == "Dark"| pokemon2$type2 == "Dark" | pokemon2$type1 == "Steel" | pokemon2$type2 == "Steel" | pokemon2$type1 == "Ice" | pokemon2$type2 == "Ice" | pokemon2$type1 == "Normal" | pokemon2$type2 == "Normal")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Fighting" & !is.na(pokemon2$type1== "Poison" | pokemon2$type2== "Poison" | pokemon2$type1== "Flying" | pokemon2$type2== "Flying" | pokemon2$type1== "Psychic" | pokemon2$type2== "Psychic" | pokemon2$type1== "Bug" | pokemon2$type2== "Bug" | pokemon2$type1 == "Fairy" | pokemon2$type2 == "Fairy")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Fighting" & !is.na(pokemon2$type1 == "Ghost" | pokemon2$type2 == "Ghost")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Poison" & !is.na(pokemon2$type1 == "Fairy" | pokemon2$type2 == "Fairy" | pokemon2$type1 == "Grass"| pokemon2$type2 == "Grass")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Poison" & !is.na(pokemon2$type1== "Poison" | pokemon2$type2== "Poison" | pokemon2$type1== "Ground" | pokemon2$type2== "Ground" | pokemon2$type1== "Rock" | pokemon2$type2== "Rock" | pokemon2$type1== "Ghost" | pokemon2$type2== "Ghost")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Poison" & !is.na(pokemon2$type1 == "Steel" | pokemon2$type2 == "Steel")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ground" & !is.na(pokemon2$type1 == "Fire" | pokemon2$type2 == "Fire" | pokemon2$type1 == "Rock"| pokemon2$type2 == "Rock" | pokemon2$type1 == "Steel" | pokemon2$type2 == "Steel" | pokemon2$type1 == "Poison" | pokemon2$type2 == "Poison" | pokemon2$type1 == "Electric" | pokemon2$type2 == "Electric")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ground" & !is.na(pokemon2$type1== "Grass" | pokemon2$type2== "Grass" | pokemon2$type1== "Bug" | pokemon2$type2== "Bug")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ground" & !is.na(pokemon2$type1 == "Flying" | pokemon2$type2 == "Flying")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Flying" & !is.na(pokemon2$type1 == "Fighting" | pokemon2$type2 == "Fighting" | pokemon2$type1 == "Grass"| pokemon2$type2 == "Grass" | pokemon2$type1 == "Bug" | pokemon2$type2 == "Bug")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Flying" & !is.na(pokemon2$type1== "Electric" | pokemon2$type2== "Electric" | pokemon2$type1== "Rock" | pokemon2$type2== "Rock" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Psychic" & !is.na(pokemon2$type1 == "Fighting" | pokemon2$type2 == "Fighting" | pokemon2$type1 == "Poison"| pokemon2$type2 == "Poison")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Psychic" & !is.na(pokemon2$type1== "Steel" | pokemon2$type2== "Steel" | pokemon2$type1== "Psychic" | pokemon2$type2== "Psychic")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Psychic" & !is.na(pokemon2$type1 == "Dark" | pokemon2$type2 == "Dark")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Bug" & !is.na(pokemon2$type1 == "Dark" | pokemon2$type2 == "Dark" | pokemon2$type1 == "Grass"| pokemon2$type2 == "Grass" | pokemon2$type1 == "Psychic" | pokemon2$type2 == "Psychic")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Bug" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Fighting" | pokemon2$type2== "Fighting" | pokemon2$type1== "Poison" | pokemon2$type2== "Poison" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel" | pokemon2$type1 == "Flying" | pokemon2$type2 == "Flying" | pokemon2$type1 == "Fairy" | pokemon2$type2 == "Fairy" | pokemon2$type1 == "Ghost" | pokemon2$type2 == "Ghost")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Rock" & !is.na(pokemon2$type1 == "Fire" | pokemon2$type2 == "Fire" | pokemon2$type1 == "Ice"| pokemon2$type2 == "Ice" | pokemon2$type1 == "Flying" | pokemon2$type2 == "Flying" | pokemon2$type1 == "Bug" | pokemon2$type2 == "Bug")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Rock" & !is.na(pokemon2$type1== "Fighting" | pokemon2$type2== "Fighting" | pokemon2$type1== "Ground" | pokemon2$type2== "Ground" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Ghost" & !is.na(pokemon2$type1 == "Ghost" | pokemon2$type2 == "Ghost" | pokemon2$type1 == "Psychic"| pokemon2$type2 == "Pyschic")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ghost" & !is.na(pokemon2$type1== "Dark" | pokemon2$type2== "Dark")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Ghost" & !is.na(pokemon2$type1 == "Normal" | pokemon2$type2 == "Normal")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Dragon" & !is.na(pokemon2$type1 == "Dragon" | pokemon2$type2 == "Dragon")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Dragon" & !is.na(pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Dragon" & !is.na(pokemon2$type1 == "Fairy" | pokemon2$type2 == "Fairy")){
+  x <- 0*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Dark" & !is.na(pokemon2$type1 == "Ghost" | pokemon2$type2 == "Ghost" | pokemon2$type1 == "Psychic"| pokemon2$type2 == "Psychic")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Dark" & !is.na(pokemon2$type1== "Dark" | pokemon2$type2== "Dark" | pokemon2$type1== "Fighting" | pokemon2$type2== "Fighting" | pokemon2$type1== "Fairy" | pokemon2$type2== "Fairy")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Steel" & !is.na(pokemon2$type1 == "Rock" | pokemon2$type2 == "Rock" | pokemon2$type1 == "Ice"| pokemon2$type2 == "Ice" | pokemon2$type1 == "Fairy" | pokemon2$type2 == "Fairy")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Steel" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Water" | pokemon2$type2== "Water" | pokemon2$type1== "Electric" | pokemon2$type2== "Electric" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  
+  } else if (move["type"] == "Fairy" & !is.na(pokemon2$type1 == "Fighting" | pokemon2$type2 == "Fighting" | pokemon2$type1 == "Dark"| pokemon2$type2 == "Dark" | pokemon2$type1 == "Dragon" | pokemon2$type2 == "Dragon")){
+  x <- 2*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else if (move["type"] == "Fairy" & !is.na(pokemon2$type1== "Fire" | pokemon2$type2== "Fire" | pokemon2$type1== "Poison" | pokemon2$type2== "Poison" | pokemon2$type1== "Steel" | pokemon2$type2== "Steel")){
+  x <- 0.5*(as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  } else {
+    #no type advantages or disadvantages
+    x <- (as.numeric(move["power"])+pokemon1$offense-pokemon2$defense)
+  pokemon2$damage(x)
+  }
+  #If the Pokemon's HP reaches zero, it faints, declaring the opposing Pokemon victorious.
+  if (pokemon2$hp <= 0){
+       pokemon1$happiness <- pokemon1$happiness + 50
+       stop("The opposing Pokemon has fainted.", call. = TRUE)
+      }
+  pokemon1$turn <- FALSE
+  pokemon2$turn <- TRUE
+  }
+```
+Secondary to attacks is status moves, which aren't based around dealing direct damage. I went the route of including a handful of status moves packed inside of a function which is universally accessible to all Pokemon, provided here:
+
+```{r}
+status <- function(pokemon1, move, pokemon2){
+  #Checking the turn-based constraint
+  if (pokemon1$turn == FALSE){
+    stop("It is not this Pokemon's turn",
+        call. = TRUE)
+  }
+  #Recover allows the Pokemon to recover some of it's own health. This is useful for Pokemon who don't have access to HP- absorbing attacks.
+  if (move == "Recover"){
+    pokemon1$hp <- pokemon1$hp + 0.333*pokemon1$hp
+    
+    #Hone Claws allows the Pokemon to raise it's offense stat, sacrificing a turn in order to raise its baseline damage output.
+  } else if (move == "Hone.Claws"){
+    pokemon1$offense <- pokemon1$offense + 0.35*pokemon1$offense
+    
+    #Defense Curl allows the user to raise its defense stat, sacrificing a turn to ensure that later it receives less damage.
+  } else if (move =="Defense.Curl"){
+    pokemon1$defense <- pokemon1$defense + 0.35*pokemon1$defense
+    
+    #Belly Drum functions as a riskier version of Hone Claws by raising the user's attack by a huge amount at the user losing half of its HP.
+  } else if (move == "Belly.Drum"){
+    pokemon1$offense <- 2*pokemon1$offense
+    pokemon1$hp <- 0.5*pokemon1$hp
+    
+    #Bulk Up serves as a middle-ground between Hone CLaws and Defense Curl, raising both the offense and defense stats by a smaller percentage.
+  } else if (move == "Bulk.Up"){
+    pokemon1$offense <- pokemon1$offense + 0.20*pokemon1$offense
+    pokemon1$defense <- pokemon1$defense + 0.20*pokemon1$defense
+  } else {
+    stop("This is not a status move.", call. = TRUE)
+  }
+  
+  #flipping the turn-based boolean switch.
+  pokemon1$turn <- FALSE
+  pokemon2$turn <- TRUE
+}
+```
+
+It's now time that I demonstrate everything introduced thus far.
+
+First, let's look at the object display:
+```{r}
+Mr.Cuddles <- Charmander
+Mr.Cuddles
+```
+What happens when we level this Pokemon up?
+```{r}
+Mr.Cuddles$levelup(20)
+Mr.Cuddles
+```
+Here, you can see the Pokemon's increases stats. We should be able to evolve this Charmeleon into a Charmeleon.
+
+```{r}
+evolve(Mr.Cuddles)
+Mr.Cuddles
+```
+Success!!  Note the jump in the offense and defense stats upon evolution. Let's try to evolve this Charmeleon into it's final stage, Charizard.
+
+```{r error = TRUE}
+evolve(Mr.Cuddles)
+```
+Oops, we haven't met the evolution prerequisites, which ask for Charmeleon to be level 36. Let's try again, this time after leveling up.
+```{r}
+Mr.Cuddles$levelup(15)
+evolve(Mr.Cuddles)
+Mr.Cuddles
+```
+As you can see, our Pokemon has gained "Flying" as its secondary typing,just as it would in the original game. The offense stat is quite impressive as well. What if we made Mr.Cuddles the most powerful Pokemon in the world?!
+
+```{r error = TRUE}
+Mr.Cuddles$levelup(10000000)
+```
+Oh... 100 is the maximum level, just as in every actual Pokemon game.
+```{r}
+Mr.Cuddles
+```
+This Charizard needs a worthy rival to battle, why not a water-type Pokemon?
+```{r}
+Charizard.Hater <- Squirtle
+Charizard.Hater$levelup(35)
+Charizard.Hater
+```
+Now, to put out Charizard's flame with a powerful Hydro Pump attack:
+```{r error= TRUE}
+attack(Charizard.Hater, Hydro.Pump, Mr.Cuddles)
+```
+Welp, Squirtle is restricted from using this attack because it isn't fully evolved. Let's try again:
+
+```{r error = TRUE}
+evolve(Charizard.Hater)
+evolve(Charizard.Hater)
+attack(Charizard.Hater, Hydro.Pump, Mr.Cuddles)
+
+Mr.Cuddles
+```
+This time the attack was successful, and output included a warning that the opposing Pokemon has fainted.
+
+It's time we demonstrate the power of status moves. I will introduce a week Pichu and show how its stats can be increase
+
+```{r}
+Pichu
+```
+
+```{r}
+Pichu$levelup(19)
+Pichu 
+```
+
+You can observe the natural growth in Pichu's stats, but what if we use Hone Claws to raise its offense stat?
+```{r}
+status(Pichu, "Hone.Claws", Eevee)
+Pichu
+```
+
+I demand more power!!
+```{r error = TRUE}
+status(Pichu, "Hone.Claws", Eevee)
+```
+It seems as if the turn-based mechanic previously defined through a Boolean switch was triggered when using status(). Now, Pichu has to wait for its opponent to act in battle.
+
+```{r}
+Eevee$levelup(19)
+Eevee
+```
+
+Let's have Eevee try Belly Drum, which raises attack by even more than Hone Claws does, at the cost of the user's HP being halved.
+```{r}
+status(Eevee, "Belly.Drum", Pichu)
+Eevee
+```
+
+Eevee is risking it by lowering its health, let's try to attack with Pichu.
+```{r error = TRUE}
+attack(Pichu, Nuzzle, Eevee)
+status(Eevee, "Hone.Claws", Pichu)
+attack(Pichu, Nuzzle, Eevee)
+```
+```{r error = TRUE}
+Pichu$happiness
+evolve(Pichu)
+```
+
+Here we can see that our Pichu gained 50 happiness after defeating the Eevee. this isn't quite the evolution threshold for Pichu's evolution into Pikachu, so let's add some more happiness and try again.
+
+```{r}
+Pichu$happiness <- Pichu$happiness + 50
+evolve(Pichu)
+Pikachu <- Pichu
+Pikachu
+```
+Success.
+
+That explains the core functionality of this package. The rest is for players to experiment with. Feel free to use pre-loaded Pokemon, add your favorites, or create your own! The current restraints are intended as a loose framework that parallels the Pokemon games, but creativity is much encouraged. This package works best as a sandbox experience.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
