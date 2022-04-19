@@ -24,6 +24,16 @@ library(tidyr)
 library(dplyr)
 library(tibble)
 ```
+This package can be viewed or downloaded directly from these links:
+
+https://github.com/crparris/pocketMonstR
+https://github.com/crparris/pocketMonstR/archive/refs/heads/master.zip
+
+To install this package in RStudio, run the following code
+```{r}
+devtools::install_github("crparris/pocketMonstR")
+```
+
 Introducing pocketMonstR:
 
 The concept behind the pocketMonstR package was to create a text-based and Pokemon-adjacent battle simulator within the bounds of R.  This package is best envisioned as a passion project, giving R users a fun and unique experience, as opposed to a practical analytical or presentational toolkit.
